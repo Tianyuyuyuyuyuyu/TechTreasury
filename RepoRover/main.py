@@ -176,6 +176,7 @@ class DownloadThread(QThread):
                 return
 
             # 下载文件
+            successful_downloads = 0
             for file_info in matching_files:
                 if not self.is_running:
                     return
@@ -202,7 +203,8 @@ class DownloadThread(QThread):
                             if chunk:
                                 f.write(chunk)
                     
-                    self.downloaded_files += 1
+                    successful_downloads += 1
+                    self.downloaded_files = successful_downloads
                     self.progress_signal.emit(self.downloaded_files, self.total_files)
                     self.log_signal.emit(f"下载完成: {file_path}")
                     
@@ -212,6 +214,13 @@ class DownloadThread(QThread):
 
                 # 添加小延迟以避免触发限制
                 time.sleep(0.5)
+
+            # 确保进度条显示100%
+            if successful_downloads == self.total_files:
+                self.progress_signal.emit(self.total_files, self.total_files)
+                self.log_signal.emit("所有文件下载完成！")
+            else:
+                self.log_signal.emit(f"下载完成，成功: {successful_downloads}/{self.total_files}")
 
         except Exception as e:
             self.error_signal.emit("下载错误", f"下载过程中出错: {str(e)}")
@@ -232,9 +241,13 @@ class DownloadThread(QThread):
                     return
                 # ... 原有的API下载代码 ...
 
-            if self.is_running and self.downloaded_files > 0:
-                self.log_signal.emit("下载完成！")
-            elif not self.is_running:
+            if self.is_running:
+                if self.downloaded_files > 0:
+                    # 确保进度条显示100%
+                    if self.downloaded_files == self.total_files:
+                        self.progress_signal.emit(self.total_files, self.total_files)
+                    self.log_signal.emit("下载完成！")
+            else:
                 self.log_signal.emit("下载已取消。")
 
         except ValueError as e:
@@ -474,7 +487,7 @@ class MainWindow(QMainWindow):
 
     def validate_inputs(self):
         if not self.url_input.text().strip():
-            self.log_message("错误: 请输入GitHub仓库URL")
+            self.log_message("错误: 请���入GitHub仓库URL")
             return False
             
         if not self.suffix_input.text().strip():
