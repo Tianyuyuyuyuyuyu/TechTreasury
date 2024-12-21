@@ -24,9 +24,9 @@ class PDFConverter:
     def __init__(self):
         self.cancel_flag = False
         self.logger = logging.getLogger(__name__)
-        self.setup_mime_types()
-        self.setup_styles()
         self.setup_fonts()
+        self.setup_styles()
+        self.setup_mime_types()
         
     def setup_fonts(self):
         """设置字体"""
@@ -36,6 +36,8 @@ class PDFConverter:
                 "C:/Windows/Fonts/msyh.ttf",  # 微软雅黑
                 "C:/Windows/Fonts/simsun.ttc", # 宋体
                 "C:/Windows/Fonts/simhei.ttf", # 黑体
+                "C:/Windows/Fonts/STSONG.TTF", # 华文宋体
+                "C:/Windows/Fonts/STKAITI.TTF", # 华文楷体
             ]
             
             for font_path in font_paths:
@@ -44,12 +46,15 @@ class PDFConverter:
                     try:
                         pdfmetrics.registerFont(TTFont(font_name, font_path))
                         self.default_font = font_name
+                        self.logger.info(f"成功注册字体: {font_name}")
                         return
-                    except:
+                    except Exception as e:
+                        self.logger.warning(f"注册字体失败 {font_name}: {str(e)}")
                         continue
                         
             # 如果没有找到中文字体，使用默认的Helvetica
             self.default_font = 'Helvetica'
+            self.logger.warning("未找到中文字体，使用Helvetica")
         except Exception as e:
             self.logger.warning(f"字体设置失败: {str(e)}")
             self.default_font = 'Helvetica'
@@ -64,8 +69,12 @@ class PDFConverter:
             fontSize=10,
             leading=14,
             firstLineIndent=0,
-            fontName=getattr(self, 'default_font', 'Helvetica'),
-            wordWrap='CJK'  # 支持中文换行
+            fontName=self.default_font,
+            wordWrap='CJK',  # 支持中文换行
+            encoding='utf-8',
+            allowWidows=0,
+            allowOrphans=0,
+            alignment=0,  # 左对齐
         ))
         
     def clean_text(self, text):
@@ -74,6 +83,9 @@ class PDFConverter:
             return ""
             
         try:
+            # 移除零宽字符和其他不可见字符
+            text = re.sub(r'[\u200b-\u200f\u202a-\u202e\ufeff\u2028\u2029]', '', text)
+            
             # 移除控制字符，但保留换行和制表符
             text = ''.join(char for char in text if ord(char) >= 32 or char in '\n\r\t')
             
@@ -83,11 +95,15 @@ class PDFConverter:
             # 统一换行符
             text = text.replace('\r\n', '\n').replace('\r', '\n')
             
-            # 移除连续的空行
-            text = re.sub(r'\n\s*\n', '\n\n', text)
+            # 移除连续的空行，但保留段落格式
+            text = re.sub(r'\n{3,}', '\n\n', text)
             
             # 确保文本是有效的UTF-8
             text = text.encode('utf-8', errors='ignore').decode('utf-8')
+            
+            # 移除行尾空白字符
+            lines = [line.rstrip() for line in text.split('\n')]
+            text = '\n'.join(lines)
             
             return text.strip()
         except Exception as e:
@@ -103,20 +119,36 @@ class PDFConverter:
                 
             # 检测编码
             result = chardet.detect(raw_data)
-            encoding = result['encoding'] if result['confidence'] > 0.7 else 'utf-8'
             
             # 尝试不同的编码
-            encodings = [encoding, 'utf-8', 'gbk', 'gb2312', 'ascii']
+            encodings = [
+                result['encoding'] if result['confidence'] > 0.7 else None,
+                'utf-8-sig',  # 处理带BOM的UTF-8
+                'utf-8',
+                'gbk',
+                'gb2312',
+                'gb18030',
+                'big5',
+                'ascii'
+            ]
+            
+            # 过滤掉None值
+            encodings = [enc for enc in encodings if enc]
+            
+            # 记录尝试的编码
+            self.logger.info(f"尝试编码: {encodings}")
             
             for enc in encodings:
                 try:
-                    if enc:
-                        text = raw_data.decode(enc)
-                        return self.clean_text(text)
-                except:
+                    text = raw_data.decode(enc)
+                    self.logger.info(f"成功使用编码 {enc}")
+                    return self.clean_text(text)
+                except Exception as e:
+                    self.logger.debug(f"使用编码 {enc} 失败: {str(e)}")
                     continue
                     
             # 如果所有编码都失败，使用忽略错误的方式解码
+            self.logger.warning("所有编码尝试失败，使用UTF-8（忽略错误）")
             return self.clean_text(raw_data.decode('utf-8', errors='ignore'))
             
         except Exception as e:
@@ -127,8 +159,14 @@ class PDFConverter:
         try:
             # 清理和转义文本
             text = self.clean_text(text)
+            
+            # 处理HTML特殊字符
             text = html.escape(text)
             
+            # 处理长行
+            if len(text) > 1000:  # 如果行太长，添加软换行
+                text = '\n'.join(text[i:i+1000] for i in range(0, len(text), 1000))
+                
             # 创建段落
             return Paragraph(text, style)
         except Exception as e:
@@ -149,7 +187,8 @@ class PDFConverter:
                 rightMargin=72,
                 leftMargin=72,
                 topMargin=72,
-                bottomMargin=72
+                bottomMargin=72,
+                encoding='utf-8'
             )
             
             # 创建内容
@@ -165,7 +204,8 @@ class PDFConverter:
                 borderColor=colors.black,
                 borderWidth=1,
                 borderPadding=5,
-                spaceAfter=20
+                spaceAfter=20,
+                fontName=self.default_font
             )
             
             file_info = self.create_paragraph(
@@ -181,7 +221,9 @@ class PDFConverter:
                 parent=self.styles['Custom'],
                 fontSize=9,
                 leading=12,
-                fontName=self.default_font
+                fontName=self.default_font,
+                wordWrap='CJK',
+                encoding='utf-8'
             )
             
             # 处理内容
@@ -258,7 +300,7 @@ class PDFConverter:
                 leading=12
             )
             
-            # 处理并添加内容
+            # 处理并添加容
             lines = self.process_text_content(content)
             for line in lines:
                 try:
@@ -536,4 +578,4 @@ class PDFConverter:
                 self.log_callback(f"处理文件失败 ({index}/{total_files}): {os.path.basename(file_path)}")
                 self.log_callback(f"错误信息: {str(e)}")
                 
-        self.log_callback(f"\n转换完成！共转换 {converted_count}/{total_files} 个��件") 
+        self.log_callback(f"\n转换完成！共转换 {converted_count}/{total_files} 个文件") 
