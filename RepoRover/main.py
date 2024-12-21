@@ -41,116 +41,211 @@ class DownloadThread(QThread):
 
     def is_file_match(self, filename, patterns):
         """检查文件名是否匹配模式"""
-        filename = filename.lower().strip()
-        self.log_signal.emit(f"检查文件: {filename}")
+        if not filename or not patterns:
+            return False
+            
+        # 清理和标准化文件名和模式
+        filename = filename.strip()
+        patterns = [p.strip() for p in patterns if p and p.strip()]
         
-        # 移除文件名开头的点号（如果有）
-        clean_filename = filename[1:] if filename.startswith('.') else filename
+        self.log_signal.emit(f"检查文件: {filename}")
+        self.log_signal.emit(f"匹配模式: {patterns}")
         
         for pattern in patterns:
-            pattern = pattern.lower().strip()
-            # 移除模式开头的点号（如果有）
-            clean_pattern = pattern[1:] if pattern.startswith('.') else pattern
-            
-            self.log_signal.emit(f"对比模式: {pattern} (清理后: {clean_pattern})")
-            
-            # 完全匹配（同时检查原始名称和清理后的名称）
-            if filename == pattern or clean_filename == clean_pattern:
-                self.log_signal.emit(f"✓ 文件 {filename} 完全匹配模式 {pattern}")
+            # 1. 完整文件名匹配
+            if pattern == filename:
+                self.log_signal.emit(f"✓ 完整文件名匹配: {filename} == {pattern}")
                 return True
-            
-            # 部分匹配（检查文件名是否包含模式）
-            if clean_pattern in clean_filename:
-                self.log_signal.emit(f"✓ 文件 {filename} 包含模式 {pattern}")
-                return True
-            
-            # 后缀匹配
-            if pattern.startswith('*'):
-                suffix = pattern[1:]
+                
+            # 2. 以点号开头的模式（作为文件扩展名）
+            if pattern.startswith('.'):
+                # 检查文件扩展名
+                if filename.lower().endswith(pattern.lower()):
+                    self.log_signal.emit(f"✓ 扩展名匹配: {filename} 以 {pattern} 结尾")
+                    return True
+                    
+            # 3. 不以点号开头的模式
             else:
-                suffix = pattern
-                
-            if filename.endswith(suffix) or clean_filename.endswith(clean_pattern):
-                self.log_signal.emit(f"✓ 文件 {filename} 后缀匹配模式 {pattern}")
-                return True
-                
+                # 如果模式包含点号，作为完整文件名匹配
+                if '.' in pattern:
+                    if filename.lower() == pattern.lower():
+                        self.log_signal.emit(f"✓ 完整文件名匹配（不区分大小写）: {filename} == {pattern}")
+                        return True
+                # 否则作为扩展名匹配（自动添加点号）
+                else:
+                    if filename.lower().endswith(f".{pattern.lower()}"):
+                        self.log_signal.emit(f"✓ 扩展名匹配（添加点号）: {filename} 以 .{pattern} 结尾")
+                        return True
+        
         self.log_signal.emit(f"✗ 文件 {filename} 不匹配任何模式")
         return False
 
-    def scan_github_page(self, url, base_path=''):
+    def parse_file_path(self, href):
+        """解析文件路径"""
+        try:
+            parts = href.split('/')
+            # 查找关键部分的索引
+            blob_index = -1
+            for i, part in enumerate(parts):
+                if part == 'blob':
+                    blob_index = i
+                    break
+                    
+            if blob_index == -1 or blob_index + 2 >= len(parts):
+                return None
+                
+            # 获取从分支名之后到文件名的所有部���
+            path_parts = parts[blob_index + 2:]
+            return '/'.join(path_parts)
+            
+        except Exception as e:
+            self.log_signal.emit(f"解析文件路径出错: {str(e)}")
+            return None
+
+    def scan_github_page(self, url, scanned_urls=None):
         """使用网页解析方式扫描GitHub页面"""
         try:
+            # 初始化已扫描URL集合
+            if scanned_urls is None:
+                scanned_urls = set()
+            
+            # 如果URL已经扫描过，直接返回
+            if url in scanned_urls:
+                self.log_signal.emit(f"跳过已扫描的页面: {url}")
+                return []
+                
+            # 添加到已扫描集合
+            scanned_urls.add(url)
+            
             self.log_signal.emit(f"\n开始扫描页面: {url}")
+            
+            # 获取页面内容
             response = self.session.get(url)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'lxml')
             
-            # 输出页面标题
-            title = soup.find('title')
-            if title:
-                self.log_signal.emit(f"\n页面标题: {title.text.strip()}")
-            
             files = []
+            processed_files = set()
             
-            # 直接搜索所有链接
-            self.log_signal.emit("\n搜索所有文件链接...")
+            # 查找所有链接
+            self.log_signal.emit("\n搜索所有链接...")
             all_links = soup.find_all('a', href=True)
+            
+            # 分别存储文件和目录链接
+            file_links = []
+            dir_links = []
+            
+            # 用于去重的集合
+            processed_hrefs = set()
             
             for link in all_links:
                 if not self.is_running:
                     return []
-                
+                    
                 href = link['href']
                 # 确保是完整的仓库内链接
                 if not href.startswith('/'):
                     continue
                     
-                # 提取文件名和路径
+                # 如果已处理过该链接，跳过
+                if href in processed_hrefs:
+                    continue
+                processed_hrefs.add(href)
+                
+                # 分类处理链接
                 if '/blob/' in href:
-                    # 这是一个文件
+                    file_links.append(link)
+                elif '/tree/' in href:
+                    # 检查是否是子目录
                     parts = href.split('/')
-                    if len(parts) < 4:  # 确保链接格式正确
+                    if len(parts) > 4:  # 确保是仓库内的目录
+                        dir_links.append(link)
+            
+            self.log_signal.emit(f"找到 {len(file_links)} 个文件链接")
+            self.log_signal.emit(f"找到 {len(dir_links)} 个目录链接")
+            
+            # 处理文件
+            for link in file_links:
+                if not self.is_running:
+                    return []
+                    
+                href = link['href']
+                
+                try:
+                    # 分割路径
+                    parts = [p for p in href.split('/') if p]
+                    
+                    # 确保路径包含足够的部分
+                    if len(parts) < 3:  # 至少需要: owner/repo/...
                         continue
-                        
+                    
+                    # 获取文件名和路径
                     file_name = parts[-1]
-                    self.log_signal.emit(f"\n发现文件链接:")
-                    self.log_signal.emit(f"- 链接: {href}")
-                    self.log_signal.emit(f"- 文件名: {file_name}")
+                    file_path = '/'.join(parts[3:])  # 跳过 owner/repo/blob
+                    
+                    # 如果文件已经处理过，跳过
+                    if file_path in processed_files:
+                        continue
+                    processed_files.add(file_path)
+                    
+                    self.log_signal.emit(f"\n发现文件:")
+                    self.log_signal.emit(f"- 名称: {file_name}")
+                    self.log_signal.emit(f"- 路径: {file_path}")
                     
                     # 检查文件名是否匹配
                     if self.is_file_match(file_name, self.suffixes):
                         # 构造下载URL
                         raw_url = f"https://raw.githubusercontent.com{href.replace('/blob/', '/')}"
                         self.log_signal.emit(f"找到匹配文件!")
-                        self.log_signal.emit(f"- 文件名: {file_name}")
                         self.log_signal.emit(f"- 下载URL: {raw_url}")
-                        
-                        # 构造文件路径
-                        file_path = '/'.join(parts[4:])  # 跳过 ['', 'owner', 'repo', 'blob', 'branch']
-                        full_path = os.path.join(base_path, file_path) if base_path else file_path
                         
                         files.append({
                             'name': file_name,
-                            'path': full_path,
+                            'path': file_path,
                             'download_url': raw_url
                         })
-                        self.log_signal.emit(f"✓ 添加匹配文件: {full_path}")
-                elif '/tree/' in href:
-                    # 这是一个目录
-                    self.log_signal.emit(f"\n发现目录链接: {href}")
-                    # 构造完整URL并递归扫描
-                    full_url = urljoin('https://github.com', href)
-                    dir_path = '/'.join(href.split('/')[4:])  # 跳过 ['', 'owner', 'repo', 'tree', 'branch']
-                    self.log_signal.emit(f"扫描子目录: {dir_path}")
-                    sub_files = self.scan_github_page(full_url, os.path.join(base_path, dir_path) if base_path else dir_path)
-                    files.extend(sub_files)
+                        self.log_signal.emit(f"✓ 添加匹配文件: {file_path}")
+                        
+                except Exception as e:
+                    self.log_signal.emit(f"处理文件链接时出错: {str(e)}")
+                    continue
+            
+            # 递归处理所有目录
+            for link in dir_links:
+                if not self.is_running:
+                    return []
+                    
+                href = link['href']
+                # 构造完整URL并递归扫描
+                full_url = urljoin('https://github.com', href)
+                dir_path = '/'.join(href.split('/')[4:])  # 跳过 ['', 'owner', 'repo', 'tree', 'branch']
+                self.log_signal.emit(f"\n扫描子目录: {dir_path}")
+                
+                # 递归扫描子目录
+                sub_files = self.scan_github_page(full_url, scanned_urls)
+                files.extend(sub_files)
+            
+            # 检查是否有分页
+            pagination_links = soup.select('a[href*="?after="]')
+            for link in pagination_links:
+                if not self.is_running:
+                    return files
+                
+                next_page_url = urljoin('https://github.com', link['href'])
+                if next_page_url not in scanned_urls:
+                    self.log_signal.emit(f"\n扫描下一页: {next_page_url}")
+                    next_page_files = self.scan_github_page(next_page_url, scanned_urls)
+                    files.extend(next_page_files)
             
             self.log_signal.emit(f"\n本页面找到 {len(files)} 个匹配文件")
             return files
             
         except Exception as e:
             self.log_signal.emit(f"\n扫描页面时出错: {str(e)}")
+            if hasattr(e, 'response'):
+                self.log_signal.emit(f"响应状态码: {e.response.status_code}")
+                self.log_signal.emit(f"响应内容: {e.response.text[:1000]}")
             return []
 
     def download_without_api(self, owner, repo):
@@ -170,7 +265,7 @@ class DownloadThread(QThread):
                 self.error_signal.emit(
                     "没有找到文件",
                     f"在仓库中没有找到匹配的文件。\n当前搜索模式: {', '.join(self.suffixes)}\n" +
-                    "请检查文件名或后缀是否正确。\n" +
+                    "请检查文件名或后缀是否正确\n" +
                     "注意：如果文件在子目录中，程序会自动搜索。"
                 )
                 return
@@ -183,17 +278,25 @@ class DownloadThread(QThread):
 
                 file_path = file_info['path']
                 download_url = file_info['download_url']
-                output_path = os.path.join(self.output_path, file_path)
+                
+                # 只使用文件名，不使用完整路径
+                file_name = os.path.basename(file_path)
+                output_path = os.path.join(self.output_path, file_name)
+                
+                # 如果文件已存在，添加序号
+                base_name, ext = os.path.splitext(file_name)
+                counter = 1
+                while os.path.exists(output_path):
+                    new_name = f"{base_name}_{counter}{ext}"
+                    output_path = os.path.join(self.output_path, new_name)
+                    counter += 1
 
-                self.log_signal.emit(f"正在下载: {file_path}")
+                self.log_signal.emit(f"正在下载: {file_path} -> {os.path.basename(output_path)}")
                 
                 try:
                     # 使用流式下载
                     response = self.session.get(download_url, stream=True)
                     response.raise_for_status()
-                    
-                    # 确保目标目录存在
-                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
                     
                     # 写入文件
                     with open(output_path, 'wb') as f:
@@ -206,7 +309,7 @@ class DownloadThread(QThread):
                     successful_downloads += 1
                     self.downloaded_files = successful_downloads
                     self.progress_signal.emit(self.downloaded_files, self.total_files)
-                    self.log_signal.emit(f"下载完成: {file_path}")
+                    self.log_signal.emit(f"下载完成: {os.path.basename(output_path)}")
                     
                 except Exception as e:
                     self.log_signal.emit(f"下载文件 {file_path} 失败: {str(e)}")
@@ -223,7 +326,41 @@ class DownloadThread(QThread):
                 self.log_signal.emit(f"下载完成，成功: {successful_downloads}/{self.total_files}")
 
         except Exception as e:
-            self.error_signal.emit("下载错误", f"下载过程中出错: {str(e)}")
+            self.error_signal.emit("���载错误", f"下载过程中出错: {str(e)}")
+
+    def download_file(self, url, output_path):
+        """下载单个文件"""
+        try:
+            headers = {}
+            if self.token:
+                headers['Authorization'] = f'token {self.token}'
+            
+            response = requests.get(url, headers=headers, stream=True)
+            response.raise_for_status()
+            
+            # 只使用文件名，不使用完整路径
+            file_name = os.path.basename(output_path)
+            new_output_path = os.path.join(self.output_path, file_name)
+            
+            # 如果文件已存在，添加序号
+            base_name, ext = os.path.splitext(file_name)
+            counter = 1
+            while os.path.exists(new_output_path):
+                new_name = f"{base_name}_{counter}{ext}"
+                new_output_path = os.path.join(self.output_path, new_name)
+                counter += 1
+            
+            with open(new_output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if not self.is_running:
+                        return False
+                    if chunk:
+                        f.write(chunk)
+            return True
+            
+        except Exception as e:
+            self.log_signal.emit(f"下载文件失败: {str(e)}")
+            return False
 
     def run(self):
         try:
@@ -368,28 +505,6 @@ class DownloadThread(QThread):
         except Exception as e:
             self.log_signal.emit(f"处理内容时出错: {str(e)}")
 
-    def download_file(self, url, output_path):
-        try:
-            headers = {}
-            if self.token:
-                headers['Authorization'] = f'token {self.token}'
-            
-            response = requests.get(url, headers=headers, stream=True)
-            response.raise_for_status()
-            
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            with open(output_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if not self.is_running:
-                        return False
-                    if chunk:
-                        f.write(chunk)
-            return True
-            
-        except Exception as e:
-            self.log_signal.emit(f"下载文件失败: {str(e)}")
-            return False
-
     def stop(self):
         self.is_running = False
 
@@ -406,14 +521,14 @@ class MainWindow(QMainWindow):
         # 创建布局
         layout = QVBoxLayout()
         
-        # 库URL输入
+        # 库URL输
         url_label = QLabel("GitHub仓库URL:")
         self.url_input = QLineEdit()
         layout.addWidget(url_label)
         layout.addWidget(self.url_input)
         
         # 文件后缀输入
-        suffix_label = QLabel("文件后缀或完整文件名 (用逗号分隔，如: .py,.js,.md 或 .cursorrules):")
+        suffix_label = QLabel("文件后缀或完整文件名 (用逗号隔，如: .py,.js,.md 或 .cursorrules):")
         self.suffix_input = QLineEdit()
         layout.addWidget(suffix_label)
         layout.addWidget(self.suffix_input)
@@ -487,7 +602,7 @@ class MainWindow(QMainWindow):
 
     def validate_inputs(self):
         if not self.url_input.text().strip():
-            self.log_message("错误: 请���入GitHub仓库URL")
+            self.log_message("错误: 请输入GitHub仓库URL")
             return False
             
         if not self.suffix_input.text().strip():
