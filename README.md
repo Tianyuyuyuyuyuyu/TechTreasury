@@ -62,6 +62,7 @@ NPM 包管理工具，用于管理和维护 NPM 包。
 
 ## 📊 项目状态
 
-![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Tianyuyuyuyuyuyu.TechTreasury)
-![Issues](https://img.shields.io/github/issues/Tianyuyuyuyuyuyu/TechTreasury)
-![Pull Requests](https://img.shields.io/github/issues-pr/Tianyuyuyuyuyuyu/TechTreasury)
+[![Issues](https://img.shields.io/github/issues/Tianyuyuyuyuyuyu/TechTreasury)](https://github.com/Tianyuyuyuyuyuyu/TechTreasury/issues)
+[![Pull Requests](https://img.shields.io/github/issues-pr/Tianyuyuyuyuyuyu/TechTreasury)](https://github.com/Tianyuyuyuyuyuyu/TechTreasury/pulls)
+[![GitHub Repo stars](https://img.shields.io/github/stars/Tianyuyuyuyuyuyu/TechTreasury?style=flat)](https://github.com/Tianyuyuyuyuyuyu/TechTreasury/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/Tianyuyuyuyuyuyu/TechTreasury?style=flat)](https://github.com/Tianyuyuyuyuyuyu/TechTreasury/network/members)
