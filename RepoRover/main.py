@@ -8,6 +8,7 @@ from PIL import Image
 import threading
 import re
 from urllib.parse import urlparse
+import time
 
 class RepoRoverApp:
     def __init__(self):
@@ -129,11 +130,145 @@ class RepoRoverApp:
             self.log_message("正在取消下载...")
             self.start_button.configure(state="normal")
             
+    def parse_github_url(self, url):
+        """解析GitHub URL，返回仓库所有者和仓库名"""
+        try:
+            # 移除URL末尾的斜杠
+            url = url.rstrip('/')
+            
+            # 处理SSH URL
+            if url.startswith('git@github.com:'):
+                path = url.split('git@github.com:')[1]
+                owner, repo = path.split('/')
+                if repo.endswith('.git'):
+                    repo = repo[:-4]
+                return owner, repo
+            
+            # 处理HTTPS URL
+            parsed = urlparse(url)
+            if parsed.netloc != 'github.com':
+                raise ValueError("不是有效的GitHub URL")
+            
+            path_parts = parsed.path.strip('/').split('/')
+            if len(path_parts) < 2:
+                raise ValueError("URL格式不正确")
+            
+            owner, repo = path_parts[:2]
+            if repo.endswith('.git'):
+                repo = repo[:-4]
+            
+            return owner, repo
+            
+        except Exception as e:
+            raise ValueError(f"无法解析GitHub URL: {str(e)}")
+
+    def create_directory(self, path):
+        """创建目录（如果不存在）"""
+        try:
+            os.makedirs(path, exist_ok=True)
+        except Exception as e:
+            self.log_message(f"创建目录失败: {str(e)}")
+            return False
+        return True
+
+    def download_file(self, url, output_path):
+        """下载单个文件"""
+        try:
+            headers = {}
+            if self.token_entry.get().strip():
+                headers['Authorization'] = f'token {self.token_entry.get().strip()}'
+            
+            response = requests.get(url, headers=headers, stream=True)
+            response.raise_for_status()
+            
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if not self.is_downloading:
+                        return False
+                    if chunk:
+                        f.write(chunk)
+            return True
+            
+        except Exception as e:
+            self.log_message(f"下载文件失败: {str(e)}")
+            return False
+
+    def process_contents(self, repo, contents, base_path, suffixes):
+        """递归处理仓库内容"""
+        try:
+            for content in contents:
+                if not self.is_downloading:
+                    return
+                
+                if content.type == 'dir':
+                    # 处理目录
+                    self.log_message(f"正在扫描目录: {content.path}")
+                    sub_contents = repo.get_contents(content.path)
+                    self.process_contents(repo, sub_contents, base_path, suffixes)
+                    
+                elif content.type == 'file':
+                    # 检查文件后缀
+                    file_suffix = os.path.splitext(content.name)[1].lower()
+                    if file_suffix in suffixes:
+                        self.log_message(f"正在下载: {content.path}")
+                        output_path = os.path.join(base_path, content.path)
+                        if self.download_file(content.download_url, output_path):
+                            self.log_message(f"下载完成: {content.path}")
+                        time.sleep(0.5)  # 添加延迟以避免触发API限制
+                
+        except Exception as e:
+            self.log_message(f"处理内容时出错: {str(e)}")
+
     def download_files(self):
-        # TODO: 实现文件下载逻辑
-        self.log_message("开始下载文件...")
-        # 这里将实现实际的下载逻辑
+        """实现文件下载逻辑"""
+        try:
+            # 获取输入
+            url = self.url_entry.get().strip()
+            suffixes = [s.strip().lower() for s in self.suffix_entry.get().strip().split(',')]
+            output_path = self.path_entry.get().strip()
+            token = self.token_entry.get().strip()
+            
+            # 解析GitHub URL
+            try:
+                owner, repo_name = self.parse_github_url(url)
+                self.log_message(f"正在访问仓库: {owner}/{repo_name}")
+            except ValueError as e:
+                self.log_message(f"错误: {str(e)}")
+                self.is_downloading = False
+                self.start_button.configure(state="normal")
+                return
+            
+            # 创建GitHub客户端
+            g = Github(token) if token else Github()
+            
+            try:
+                # 获取仓库
+                repo = g.get_repo(f"{owner}/{repo_name}")
+                
+                # 获取仓库内容
+                contents = repo.get_contents("")
+                self.log_message("开始扫描仓库文件...")
+                
+                # 处理仓库内容
+                self.process_contents(repo, contents, output_path, suffixes)
+                
+                if self.is_downloading:
+                    self.log_message("下载完成！")
+                else:
+                    self.log_message("下载已取消。")
+                
+            except Exception as e:
+                self.log_message(f"访问仓库失败: {str(e)}")
+            
+        except Exception as e:
+            self.log_message(f"发生错误: {str(e)}")
         
+        finally:
+            self.is_downloading = False
+            self.start_button.configure(state="normal")
+            g.close()
+
     def run(self):
         self.app.mainloop()
 
