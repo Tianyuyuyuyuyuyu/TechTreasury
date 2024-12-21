@@ -8,9 +8,10 @@ import os
 from github import Github
 from github import RateLimitExceededException, UnknownObjectException, GithubException
 import requests
+from bs4 import BeautifulSoup
 import threading
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import time
 from datetime import datetime
 import json
@@ -33,79 +34,97 @@ class DownloadThread(QThread):
         self.total_files = 0
         self.downloaded_files = 0
         self.g = None
+        self.session = requests.Session()
+        if token:
+            self.session.headers.update({'Authorization': f'token {token}'})
+        self.session.headers.update({'User-Agent': 'Mozilla/5.0'})
 
-    def get_raw_content_url(self, owner, repo, path, branch='main'):
-        """获取文件的原始内容URL"""
-        return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+    def is_file_match(self, filename, patterns):
+        """检查文件名是否匹配模式"""
+        filename = filename.lower()
+        for pattern in patterns:
+            pattern = pattern.lower()
+            # 如果模式以点开头，视为完整文件名匹配
+            if pattern.startswith('.'):
+                if filename == pattern:
+                    return True
+            # 否则视为后缀匹配
+            else:
+                if filename.endswith(pattern):
+                    return True
+        return False
 
-    def get_tree_url(self, owner, repo, branch='main'):
-        """获取仓库文件树的URL"""
-        return f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+    def scan_github_page(self, url):
+        """使用网页解析方式扫描GitHub页面"""
+        try:
+            response = self.session.get(url)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'lxml')
+            
+            files = []
+            
+            # 查找文件和目录列表
+            items = soup.select('div[role="row"].Box-row')
+            
+            for item in items:
+                if not self.is_running:
+                    return []
+                
+                # 获取类型图标
+                icon = item.select_one('svg[aria-label]')
+                if not icon:
+                    continue
+                    
+                item_type = 'file' if 'File' in icon['aria-label'] else 'directory'
+                
+                # 获取名称和链接
+                link = item.select_one('a[href]')
+                if not link:
+                    continue
+                    
+                name = link.text.strip()
+                path = link['href']
+                
+                # 转换相对URL为绝对URL
+                full_url = urljoin('https://github.com', path)
+                
+                if item_type == 'directory':
+                    # 递归扫描子目录
+                    sub_files = self.scan_github_page(full_url)
+                    files.extend(sub_files)
+                else:
+                    # 检查文件名是否匹配
+                    if self.is_file_match(name, self.suffixes):
+                        # 构造原始文件URL
+                        raw_url = full_url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
+                        files.append({
+                            'name': name,
+                            'path': path.split('/blob/')[1] if '/blob/' in path else path,
+                            'download_url': raw_url
+                        })
+            
+            return files
+            
+        except requests.exceptions.RequestException as e:
+            if hasattr(e.response, 'status_code') and e.response.status_code == 403:
+                self.error_signal.emit(
+                    "访问限制",
+                    "访问被拒绝。如果这是私有仓库，请提供有效的Token。\n" +
+                    "如果是公开仓库，可能是因为访问频率限制，请稍后再试。"
+                )
+            else:
+                self.error_signal.emit("扫描错误", f"扫描页面失败: {str(e)}")
+            return []
 
     def download_without_api(self, owner, repo):
-        """使用直接下载方式获取文件"""
+        """使用网页解析方式下载文件"""
         try:
-            # 构建请求头
-            headers = {
-                'Accept': 'application/vnd.github.v3.raw',
-                'User-Agent': 'RepoRover-App'
-            }
-            if self.token:
-                headers['Authorization'] = f'token {self.token}'
-
-            # 获取仓库默认分支
-            try:
-                repo_url = f"https://api.github.com/repos/{owner}/{repo}"
-                response = requests.get(repo_url, headers=headers)
-                response.raise_for_status()
-                default_branch = response.json().get('default_branch', 'main')
-            except:
-                # 如果获取默认分支失败，使用 'main' 作为默认值
-                default_branch = 'main'
-                self.log_signal.emit("无法获取默认分支，使用 'main' 作为默认值")
-
-            # 获取文件列表（使用原始内容API）
-            contents_url = f"https://api.github.com/repos/{owner}/{repo}/contents"
+            repo_url = f"https://github.com/{owner}/{repo}"
             self.log_signal.emit("正在扫描仓库文件...")
             
-            def scan_directory(path=''):
-                try:
-                    if not self.is_running:
-                        return []
-                    
-                    url = f"{contents_url}/{path}" if path else contents_url
-                    response = requests.get(url, headers=headers)
-                    response.raise_for_status()
-                    contents = response.json()
-                    
-                    matching_files = []
-                    for item in contents:
-                        if not self.is_running:
-                            return []
-                            
-                        if item['type'] == 'dir':
-                            # 递归扫描子目录
-                            matching_files.extend(scan_directory(item['path']))
-                        elif item['type'] == 'file':
-                            # 检查文件后缀
-                            if any(item['name'].lower().endswith(suffix) for suffix in self.suffixes):
-                                matching_files.append(item)
-                    
-                    return matching_files
-                    
-                except requests.exceptions.RequestException as e:
-                    if e.response and e.response.status_code == 403:
-                        self.error_signal.emit(
-                            "访问限制",
-                            "访问被拒绝。如果这是私有仓库，请提供有效的Token。\n" +
-                            "如果是公开仓库，可能是因为访问频率限制，请稍后再试。"
-                        )
-                    else:
-                        self.error_signal.emit("扫描错误", f"扫描目录失败: {str(e)}")
-                    return []
-
-            # 扫描所有文件
-            matching_files = scan_directory()
+            # 扫描文件
+            matching_files = self.scan_github_page(repo_url)
+            
             self.total_files = len(matching_files)
             self.log_signal.emit(f"找到 {self.total_files} 个匹配的文件")
 
@@ -129,7 +148,7 @@ class DownloadThread(QThread):
                 
                 try:
                     # 使用流式下载
-                    response = requests.get(download_url, headers=headers, stream=True)
+                    response = self.session.get(download_url, stream=True)
                     response.raise_for_status()
                     
                     # 确保目标目录存在
@@ -164,7 +183,7 @@ class DownloadThread(QThread):
             self.log_signal.emit(f"正在访问仓库: {owner}/{repo_name}")
 
             if not self.use_api:
-                # 使用直接下载模式
+                # 使用网页解析模式
                 self.download_without_api(owner, repo_name)
             else:
                 # 使用GitHub API模式
@@ -334,14 +353,14 @@ class MainWindow(QMainWindow):
         # 创建布局
         layout = QVBoxLayout()
         
-        # 仓库URL输入
+        # 库URL输入
         url_label = QLabel("GitHub仓库URL:")
         self.url_input = QLineEdit()
         layout.addWidget(url_label)
         layout.addWidget(self.url_input)
         
         # 文件后缀输入
-        suffix_label = QLabel("文件后缀 (用逗号分隔，如: .py,.js,.md):")
+        suffix_label = QLabel("文件后缀或完整文件名 (用逗号分隔，如: .py,.js,.md 或 .cursorrules):")
         self.suffix_input = QLineEdit()
         layout.addWidget(suffix_label)
         layout.addWidget(self.suffix_input)

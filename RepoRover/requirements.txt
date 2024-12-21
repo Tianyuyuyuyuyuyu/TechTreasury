@@ -1,4 +1,6 @@
 requests==2.31.0
 PyGithub==2.1.1
 PyQt5==5.15.10
-pillow==10.0.0 
+pillow==10.0.0
+beautifulsoup4==4.12.3
+lxml==5.1.0 
