@@ -41,86 +41,124 @@ class DownloadThread(QThread):
 
     def is_file_match(self, filename, patterns):
         """检查文件名是否匹配模式"""
-        filename = filename.lower()
+        filename = filename.lower().strip()
+        self.log_signal.emit(f"检查文件: {filename}")
+        
+        # 移除文件名开头的点号（如果有）
+        clean_filename = filename[1:] if filename.startswith('.') else filename
+        
         for pattern in patterns:
-            pattern = pattern.lower()
-            # 如果模式以点开头，视为完整文件名匹配
-            if pattern.startswith('.'):
-                if filename == pattern:
-                    return True
-            # 否则视为后缀匹配
+            pattern = pattern.lower().strip()
+            # 移除模式开头的点号（如果有）
+            clean_pattern = pattern[1:] if pattern.startswith('.') else pattern
+            
+            self.log_signal.emit(f"对比模式: {pattern} (清理后: {clean_pattern})")
+            
+            # 完全匹配（同时检查原始名称和清理后的名称）
+            if filename == pattern or clean_filename == clean_pattern:
+                self.log_signal.emit(f"✓ 文件 {filename} 完全匹配模式 {pattern}")
+                return True
+            
+            # 部分匹配（检查文件名是否包含模式）
+            if clean_pattern in clean_filename:
+                self.log_signal.emit(f"✓ 文件 {filename} 包含模式 {pattern}")
+                return True
+            
+            # 后缀匹配
+            if pattern.startswith('*'):
+                suffix = pattern[1:]
             else:
-                if filename.endswith(pattern):
-                    return True
+                suffix = pattern
+                
+            if filename.endswith(suffix) or clean_filename.endswith(clean_pattern):
+                self.log_signal.emit(f"✓ 文件 {filename} 后缀匹配模式 {pattern}")
+                return True
+                
+        self.log_signal.emit(f"✗ 文件 {filename} 不匹配任何模式")
         return False
 
-    def scan_github_page(self, url):
+    def scan_github_page(self, url, base_path=''):
         """使用网页解析方式扫描GitHub页面"""
         try:
+            self.log_signal.emit(f"\n开始扫描页面: {url}")
             response = self.session.get(url)
             response.raise_for_status()
+            
             soup = BeautifulSoup(response.text, 'lxml')
+            
+            # 输出页面标题
+            title = soup.find('title')
+            if title:
+                self.log_signal.emit(f"\n页面标题: {title.text.strip()}")
             
             files = []
             
-            # 查找文件和目录列表
-            items = soup.select('div[role="row"].Box-row')
+            # 直接搜索所有链接
+            self.log_signal.emit("\n搜索所有文件链接...")
+            all_links = soup.find_all('a', href=True)
             
-            for item in items:
+            for link in all_links:
                 if not self.is_running:
                     return []
                 
-                # 获取类型图标
-                icon = item.select_one('svg[aria-label]')
-                if not icon:
+                href = link['href']
+                # 确保是完整的仓库内链接
+                if not href.startswith('/'):
                     continue
                     
-                item_type = 'file' if 'File' in icon['aria-label'] else 'directory'
-                
-                # 获取名称和链接
-                link = item.select_one('a[href]')
-                if not link:
-                    continue
+                # 提取文件名和路径
+                if '/blob/' in href:
+                    # 这是一个文件
+                    parts = href.split('/')
+                    if len(parts) < 4:  # 确保链接格式正确
+                        continue
+                        
+                    file_name = parts[-1]
+                    self.log_signal.emit(f"\n发现文件链接:")
+                    self.log_signal.emit(f"- 链接: {href}")
+                    self.log_signal.emit(f"- 文件名: {file_name}")
                     
-                name = link.text.strip()
-                path = link['href']
-                
-                # 转换相对URL为绝对URL
-                full_url = urljoin('https://github.com', path)
-                
-                if item_type == 'directory':
-                    # 递归扫描子目录
-                    sub_files = self.scan_github_page(full_url)
-                    files.extend(sub_files)
-                else:
                     # 检查文件名是否匹配
-                    if self.is_file_match(name, self.suffixes):
-                        # 构造原始文件URL
-                        raw_url = full_url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/')
+                    if self.is_file_match(file_name, self.suffixes):
+                        # 构造下载URL
+                        raw_url = f"https://raw.githubusercontent.com{href.replace('/blob/', '/')}"
+                        self.log_signal.emit(f"找到匹配文件!")
+                        self.log_signal.emit(f"- 文件名: {file_name}")
+                        self.log_signal.emit(f"- 下载URL: {raw_url}")
+                        
+                        # 构造文件路径
+                        file_path = '/'.join(parts[4:])  # 跳过 ['', 'owner', 'repo', 'blob', 'branch']
+                        full_path = os.path.join(base_path, file_path) if base_path else file_path
+                        
                         files.append({
-                            'name': name,
-                            'path': path.split('/blob/')[1] if '/blob/' in path else path,
+                            'name': file_name,
+                            'path': full_path,
                             'download_url': raw_url
                         })
+                        self.log_signal.emit(f"✓ 添加匹配文件: {full_path}")
+                elif '/tree/' in href:
+                    # 这是一个目录
+                    self.log_signal.emit(f"\n发现目录链接: {href}")
+                    # 构造完整URL并递归扫描
+                    full_url = urljoin('https://github.com', href)
+                    dir_path = '/'.join(href.split('/')[4:])  # 跳过 ['', 'owner', 'repo', 'tree', 'branch']
+                    self.log_signal.emit(f"扫描子目录: {dir_path}")
+                    sub_files = self.scan_github_page(full_url, os.path.join(base_path, dir_path) if base_path else dir_path)
+                    files.extend(sub_files)
             
+            self.log_signal.emit(f"\n本页面找到 {len(files)} 个匹配文件")
             return files
             
-        except requests.exceptions.RequestException as e:
-            if hasattr(e.response, 'status_code') and e.response.status_code == 403:
-                self.error_signal.emit(
-                    "访问限制",
-                    "访问被拒绝。如果这是私有仓库，请提供有效的Token。\n" +
-                    "如果是公开仓库，可能是因为访问频率限制，请稍后再试。"
-                )
-            else:
-                self.error_signal.emit("扫描错误", f"扫描页面失败: {str(e)}")
+        except Exception as e:
+            self.log_signal.emit(f"\n扫描页面时出错: {str(e)}")
             return []
 
     def download_without_api(self, owner, repo):
         """使用网页解析方式下载文件"""
         try:
             repo_url = f"https://github.com/{owner}/{repo}"
-            self.log_signal.emit("正在扫描仓库文件...")
+            self.log_signal.emit(f"正在扫描仓库: {repo_url}")
+            self.log_signal.emit(f"搜索模式: {', '.join(self.suffixes)}")
             
             # 扫描文件
             matching_files = self.scan_github_page(repo_url)
@@ -131,7 +169,9 @@ class DownloadThread(QThread):
             if self.total_files == 0:
                 self.error_signal.emit(
                     "没有找到文件",
-                    f"在仓库中没有找到匹配的文件。\n当前搜索后缀: {', '.join(self.suffixes)}"
+                    f"在仓库中没有找到匹配的文件。\n当前搜索模式: {', '.join(self.suffixes)}\n" +
+                    "请检查文件名或后缀是否正确。\n" +
+                    "注意：如果文件在子目录中，程序会自动搜索。"
                 )
                 return
 
