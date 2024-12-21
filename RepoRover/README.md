@@ -6,6 +6,10 @@
 
 RepoRover 是一个强大的 GitHub仓库文件筛选下载工具，它允许用户根据文件后缀或完整文件名从任意 GitHub 仓库中批量下载文件。
 
+## 界面预览
+
+![RepoRover界面预览](docs/images/screenshot.png)
+
 ## 特性
 
 - 🔍 支持按文件后缀或完整文件名筛选
