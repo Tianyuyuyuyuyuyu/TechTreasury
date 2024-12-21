@@ -128,63 +128,74 @@ class DownloadThread(QThread):
             files = []
             processed_files = set()
             
-            # 查找所有链接
-            self.log_signal.emit("\n搜索所有链接...")
-            all_links = soup.find_all('a', href=True)
+            # 查找所有可能的文件和目录链接
+            all_links = []
             
-            # 分别存储文件和目录链接
+            # 1. 查找文件和目录表格中的链接
+            rows = soup.select('div[role="row"]')
+            for row in rows:
+                link = row.select_one('a[role="rowheader"]')
+                if link and link.get('href'):
+                    all_links.append(link)
+            
+            # 2. 查找传统布局中的链接
+            if not all_links:
+                links = soup.select('div.js-navigation-item a.js-navigation-open')
+                all_links.extend(links)
+            
+            # 3. 查找文件浏览器中的链接
+            content_links = soup.select('td.content a')
+            all_links.extend(content_links)
+            
+            # 4. 查找其他可能的文件链接
+            other_links = soup.select('a[href*="/blob/"], a[href*="/tree/"]')
+            all_links.extend(other_links)
+            
+            # 去重链接
+            all_links = list({link['href']: link for link in all_links if link.get('href')}.values())
+            
+            # 分类处理链接
             file_links = []
             dir_links = []
-            
-            # 用于去重的集合
-            processed_hrefs = set()
             
             for link in all_links:
                 if not self.is_running:
                     return []
                     
                 href = link['href']
-                # 确保是完整的仓库内链接
                 if not href.startswith('/'):
                     continue
-                    
-                # 如果已处理过该链接，跳过
-                if href in processed_hrefs:
-                    continue
-                processed_hrefs.add(href)
                 
-                # 分类处理链接
-                if '/blob/' in href:
-                    file_links.append(link)
-                elif '/tree/' in href:
-                    # 检查是否是子目录
-                    parts = href.split('/')
-                    if len(parts) > 4:  # 确保是仓库内的目录
-                        dir_links.append(link)
+                # 规范化URL
+                if href.startswith('http'):
+                    parsed = urlparse(href)
+                    href = parsed.path
+                
+                # 分类链接
+                parts = [p for p in href.split('/') if p]
+                if len(parts) >= 3:  # 至少需要: owner/repo/...
+                    if '/blob/' in href:
+                        file_links.append((link, href, parts))
+                    elif '/tree/' in href:
+                        dir_links.append((link, href, parts))
             
             self.log_signal.emit(f"找到 {len(file_links)} 个文件链接")
             self.log_signal.emit(f"找到 {len(dir_links)} 个目录链接")
             
             # 处理文件
-            for link in file_links:
+            for link, href, parts in file_links:
                 if not self.is_running:
                     return []
-                    
-                href = link['href']
                 
                 try:
-                    # 分割路径
-                    parts = [p for p in href.split('/') if p]
-                    
-                    # 确保路径包含足够的部分
-                    if len(parts) < 3:  # 至少需要: owner/repo/...
-                        continue
-                    
-                    # 获取文件名和路径
+                    # 提取文件信息
                     file_name = parts[-1]
-                    file_path = '/'.join(parts[3:])  # 跳过 owner/repo/blob
                     
-                    # 如果文件已经处理过，跳过
+                    # 获取相对路径
+                    blob_index = parts.index('blob')
+                    file_path = '/'.join(parts[blob_index + 2:])
+                    
+                    # 如果文件已处理过，跳过
                     if file_path in processed_files:
                         continue
                     processed_files.add(file_path)
@@ -211,20 +222,26 @@ class DownloadThread(QThread):
                     self.log_signal.emit(f"处理文件链接时出错: {str(e)}")
                     continue
             
-            # 递归处理所有目录
-            for link in dir_links:
+            # 处理目录
+            for link, href, parts in dir_links:
                 if not self.is_running:
                     return []
-                    
-                href = link['href']
-                # 构造完整URL并递归扫描
-                full_url = urljoin('https://github.com', href)
-                dir_path = '/'.join(href.split('/')[4:])  # 跳过 ['', 'owner', 'repo', 'tree', 'branch']
-                self.log_signal.emit(f"\n扫描子目录: {dir_path}")
                 
-                # 递归扫描子目录
-                sub_files = self.scan_github_page(full_url, scanned_urls)
-                files.extend(sub_files)
+                try:
+                    # 获取目录路径
+                    tree_index = parts.index('tree')
+                    dir_path = '/'.join(parts[tree_index + 2:])
+                    
+                    self.log_signal.emit(f"\n扫描子目录: {dir_path}")
+                    
+                    # 构造完整URL并递归扫描
+                    full_url = urljoin('https://github.com', href)
+                    sub_files = self.scan_github_page(full_url, scanned_urls)
+                    files.extend(sub_files)
+                    
+                except Exception as e:
+                    self.log_signal.emit(f"处理目录链接时出错: {str(e)}")
+                    continue
             
             # 检查是否有分页
             pagination_links = soup.select('a[href*="?after="]')
@@ -326,7 +343,7 @@ class DownloadThread(QThread):
                 self.log_signal.emit(f"下载完成，成功: {successful_downloads}/{self.total_files}")
 
         except Exception as e:
-            self.error_signal.emit("���载错误", f"下载过程中出错: {str(e)}")
+            self.error_signal.emit("下载错误", f"下载过程中出错: {str(e)}")
 
     def download_file(self, url, output_path):
         """下载单个文件"""
