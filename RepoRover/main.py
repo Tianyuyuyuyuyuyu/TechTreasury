@@ -123,10 +123,6 @@ class DownloadThread(QThread):
             response = self.session.get(url)
             response.raise_for_status()
             
-            # 记录响应信息
-            self.log_signal.emit(f"页面响应状态码: {response.status_code}")
-            self.log_signal.emit(f"页面内容预览:\n{response.text[:500]}")
-            
             soup = BeautifulSoup(response.text, 'lxml')
             
             files = []
@@ -135,39 +131,39 @@ class DownloadThread(QThread):
             # 查找所有可能的文件和目录链接
             all_links = []
             
-            # 1. 查找新版GitHub界面的链接
+            # 1. 查找文件和目录表格中的链接（新版GitHub界面）
             rows = soup.select('div[role="row"]')
             for row in rows:
                 link = row.select_one('a[role="rowheader"]')
                 if link and link.get('href'):
                     all_links.append(link)
-                    
-            # 2. 查找文件列表中的链接
-            list_links = soup.select('div.Box-row a')
-            all_links.extend(list_links)
             
-            # 3. 查找传统布局中的链接
-            nav_links = soup.select('div.js-navigation-item a')
-            all_links.extend(nav_links)
+            # 2. 查找传统布局中的链接
+            links = soup.select('div.js-navigation-item a.js-navigation-open')
+            all_links.extend(links)
             
-            # 4. 查找文件浏览器中的链接
+            # 3. 查找文件浏览器中的链接
             content_links = soup.select('td.content a')
             all_links.extend(content_links)
             
-            # 5. 查找目录树中的链接
-            tree_links = soup.select('div.js-details-container a')
-            all_links.extend(tree_links)
+            # 4. 查找其他可能的文件链接
+            other_links = soup.select('a[href*="/blob/"], a[href*="/tree/"]')
+            all_links.extend(other_links)
             
-            # 6. 查找所有可能的文件和目录链接
-            all_possible_links = soup.select('a[href*="/blob/"], a[href*="/tree/"]')
-            all_links.extend(all_possible_links)
+            # 5. 查找新版GitHub界面的链接
+            new_ui_links = soup.select('div.react-directory-filename-column a')
+            all_links.extend(new_ui_links)
             
-            # 去重链接
+            # 6. 查找文件列表中的链接
+            list_links = soup.select('div.Box-row a[href*="/blob/"], div.Box-row a[href*="/tree/"]')
+            all_links.extend(list_links)
+            
+            # 去重链接，保留所有可能的链接
             unique_links = []
             seen_hrefs = set()
             for link in all_links:
                 href = link.get('href', '')
-                if href and href not in seen_hrefs and ('/blob/' in href or '/tree/' in href):
+                if href and href not in seen_hrefs:
                     seen_hrefs.add(href)
                     unique_links.append(link)
             
@@ -532,7 +528,7 @@ class DownloadThread(QThread):
                             self.downloaded_files += 1
                             self.progress_signal.emit(self.downloaded_files, self.total_files)
                             self.log_signal.emit(f"下载完成: {content.path}")
-                        time.sleep(1)  # 加延迟以避免触发API限制
+                        time.sleep(1)  # ��加延迟以避免触发API限制
                 
         except RateLimitExceededException:
             raise
