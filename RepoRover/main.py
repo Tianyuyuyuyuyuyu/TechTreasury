@@ -43,30 +43,69 @@ class DownloadThread(QThread):
         return f"https://api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
 
     def download_without_api(self, owner, repo):
-        """使用树API直接下载文件"""
+        """使用直接下载方式获取文件"""
         try:
             # 构建请求头
-            headers = {'Accept': 'application/vnd.github.v3+json'}
+            headers = {
+                'Accept': 'application/vnd.github.v3.raw',
+                'User-Agent': 'RepoRover-App'
+            }
             if self.token:
                 headers['Authorization'] = f'token {self.token}'
 
-            # 获取默认分支
-            repo_url = f"https://api.github.com/repos/{owner}/{repo}"
-            response = requests.get(repo_url, headers=headers)
-            response.raise_for_status()
-            default_branch = response.json()['default_branch']
+            # 获取仓库默认分支
+            try:
+                repo_url = f"https://api.github.com/repos/{owner}/{repo}"
+                response = requests.get(repo_url, headers=headers)
+                response.raise_for_status()
+                default_branch = response.json().get('default_branch', 'main')
+            except:
+                # 如果获取默认分支失败，使用 'main' 作为默认值
+                default_branch = 'main'
+                self.log_signal.emit("无法获取默认分支，使用 'main' 作为默认值")
 
-            # 获取文件树
-            tree_url = self.get_tree_url(owner, repo, default_branch)
-            response = requests.get(tree_url, headers=headers)
-            response.raise_for_status()
-            tree = response.json()
-
-            # 计算匹配文件数量
-            matching_files = [item for item in tree['tree'] 
-                            if item['type'] == 'blob' and 
-                            any(item['path'].lower().endswith(suffix) for suffix in self.suffixes)]
+            # 获取文件列表（使用原始内容API）
+            contents_url = f"https://api.github.com/repos/{owner}/{repo}/contents"
+            self.log_signal.emit("正在扫描仓库文件...")
             
+            def scan_directory(path=''):
+                try:
+                    if not self.is_running:
+                        return []
+                    
+                    url = f"{contents_url}/{path}" if path else contents_url
+                    response = requests.get(url, headers=headers)
+                    response.raise_for_status()
+                    contents = response.json()
+                    
+                    matching_files = []
+                    for item in contents:
+                        if not self.is_running:
+                            return []
+                            
+                        if item['type'] == 'dir':
+                            # 递归扫描子目录
+                            matching_files.extend(scan_directory(item['path']))
+                        elif item['type'] == 'file':
+                            # 检查文件后缀
+                            if any(item['name'].lower().endswith(suffix) for suffix in self.suffixes):
+                                matching_files.append(item)
+                    
+                    return matching_files
+                    
+                except requests.exceptions.RequestException as e:
+                    if e.response and e.response.status_code == 403:
+                        self.error_signal.emit(
+                            "访问限制",
+                            "访问被拒绝。如果这是私有仓库，请提供有效的Token。\n" +
+                            "如果是公开仓库，可能是因为访问频率限制，请稍后再试。"
+                        )
+                    else:
+                        self.error_signal.emit("扫描错误", f"扫描目录失败: {str(e)}")
+                    return []
+
+            # 扫描所有文件
+            matching_files = scan_directory()
             self.total_files = len(matching_files)
             self.log_signal.emit(f"找到 {self.total_files} 个匹配的文件")
 
@@ -83,22 +122,40 @@ class DownloadThread(QThread):
                     return
 
                 file_path = file_info['path']
-                raw_url = self.get_raw_content_url(owner, repo, file_path, default_branch)
+                download_url = file_info['download_url']
                 output_path = os.path.join(self.output_path, file_path)
 
                 self.log_signal.emit(f"正在下载: {file_path}")
-                if self.download_file(raw_url, output_path):
+                
+                try:
+                    # 使用流式下载
+                    response = requests.get(download_url, headers=headers, stream=True)
+                    response.raise_for_status()
+                    
+                    # 确保目标目录存在
+                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                    
+                    # 写入文件
+                    with open(output_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if not self.is_running:
+                                return
+                            if chunk:
+                                f.write(chunk)
+                    
                     self.downloaded_files += 1
                     self.progress_signal.emit(self.downloaded_files, self.total_files)
                     self.log_signal.emit(f"下载完成: {file_path}")
+                    
+                except Exception as e:
+                    self.log_signal.emit(f"下载文件 {file_path} 失败: {str(e)}")
+                    continue
 
-                time.sleep(0.5)  # 添加小延迟
+                # 添加小延迟以避免触发限制
+                time.sleep(0.5)
 
-        except requests.exceptions.RequestException as e:
-            if e.response and e.response.status_code == 403:
-                self.error_signal.emit("访问限制", "访问被拒绝，请检查您的Token是否有效，或等待限制重置。")
-            else:
-                self.error_signal.emit("下载错误", f"下载文件时出错: {str(e)}")
+        except Exception as e:
+            self.error_signal.emit("下载错误", f"下载过程中出错: {str(e)}")
 
     def run(self):
         try:
