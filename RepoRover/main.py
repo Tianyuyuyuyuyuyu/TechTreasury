@@ -102,12 +102,14 @@ class DownloadThread(QThread):
             self.log_signal.emit(f"解析文件路径出错: {str(e)}")
             return None
 
-    def scan_github_page(self, url, scanned_urls=None):
+    def scan_github_page(self, url, scanned_urls=None, processed_files=None):
         """使用网页解析方式扫描GitHub页面"""
         try:
-            # 初始化已扫描URL集合
+            # 初始化已扫描URL集合和已处理文件集合
             if scanned_urls is None:
                 scanned_urls = set()
+            if processed_files is None:
+                processed_files = set()
             
             # 如果URL已经扫描过，直接返回
             if url in scanned_urls:
@@ -126,7 +128,6 @@ class DownloadThread(QThread):
             soup = BeautifulSoup(response.text, 'lxml')
             
             files = []
-            processed_files = set()
             
             # 查找所有可能的文件和目录链接
             all_links = []
@@ -158,31 +159,39 @@ class DownloadThread(QThread):
             list_links = soup.select('div.Box-row a[href*="/blob/"], div.Box-row a[href*="/tree/"]')
             all_links.extend(list_links)
             
-            # 去重链接，保留所有可能的链接
-            unique_links = []
-            seen_hrefs = set()
+            # 7. 查找目录链接
+            dir_links_elements = soup.select('a[href*="/tree/"]')
+            all_links.extend(dir_links_elements)
+            
+            # 去重链接，使用规范化的URL作为键
+            unique_links = {}
             for link in all_links:
                 href = link.get('href', '')
-                if href and href not in seen_hrefs:
-                    seen_hrefs.add(href)
-                    unique_links.append(link)
+                if not href:
+                    continue
+                    
+                # 规范化URL
+                if href.startswith('http'):
+                    parsed = urlparse(href)
+                    href = parsed.path
+                elif not href.startswith('/'):
+                    # 如果是相对路径，转换为绝对路径
+                    base_parts = urlparse(url).path.strip('/').split('/')
+                    if len(base_parts) >= 2:  # 至少包含 owner/repo
+                        href = f"/{'/'.join(base_parts[:2])}/{href}"
+                    else:
+                        continue
+                
+                # 使用规范化的URL作为键
+                unique_links[href] = link
             
             # 分类处理链接
             file_links = []
             dir_links = []
             
-            for link in unique_links:
+            for href, link in unique_links.items():
                 if not self.is_running:
                     return []
-                    
-                href = link['href']
-                if not href.startswith('/'):
-                    continue
-                
-                # 规范化URL
-                if href.startswith('http'):
-                    parsed = urlparse(href)
-                    href = parsed.path
                 
                 # 分类链接
                 parts = [p for p in href.split('/') if p]
@@ -208,10 +217,14 @@ class DownloadThread(QThread):
                     blob_index = parts.index('blob')
                     file_path = '/'.join(parts[blob_index + 2:])
                     
+                    # 构造唯一标识符（使用规范化的路径）
+                    file_id = file_path.lower()  # 不区分大小写
+                    
                     # 如果文件已处理过，跳过
-                    if file_path in processed_files:
+                    if file_id in processed_files:
+                        self.log_signal.emit(f"跳过重复文件: {file_path}")
                         continue
-                    processed_files.add(file_path)
+                    processed_files.add(file_id)
                     
                     self.log_signal.emit(f"\n发现文件:")
                     self.log_signal.emit(f"- 名称: {file_name}")
@@ -249,7 +262,7 @@ class DownloadThread(QThread):
                     
                     # 构造完整URL并递归扫描
                     full_url = urljoin('https://github.com', href)
-                    sub_files = self.scan_github_page(full_url, scanned_urls)
+                    sub_files = self.scan_github_page(full_url, scanned_urls, processed_files)
                     files.extend(sub_files)
                     
                 except Exception as e:
@@ -265,7 +278,7 @@ class DownloadThread(QThread):
                 next_page_url = urljoin('https://github.com', link['href'])
                 if next_page_url not in scanned_urls:
                     self.log_signal.emit(f"\n扫描下一页: {next_page_url}")
-                    next_page_files = self.scan_github_page(next_page_url, scanned_urls)
+                    next_page_files = self.scan_github_page(next_page_url, scanned_urls, processed_files)
                     files.extend(next_page_files)
             
             self.log_signal.emit(f"\n本页面找到 {len(files)} 个匹配文件")
@@ -300,6 +313,9 @@ class DownloadThread(QThread):
                 )
                 return
 
+            # 用于跟踪已使用的文件名
+            used_filenames = {}
+
             # 下载文件
             successful_downloads = 0
             for file_info in matching_files:
@@ -309,19 +325,23 @@ class DownloadThread(QThread):
                 file_path = file_info['path']
                 download_url = file_info['download_url']
                 
-                # 只使用文件名，不使用完整路径
-                file_name = os.path.basename(file_path)
-                output_path = os.path.join(self.output_path, file_name)
+                # 获取原始文件名和扩展名
+                original_name = os.path.basename(file_path)
+                base_name, ext = os.path.splitext(original_name)
                 
-                # 如果文件已存在，添加序号
-                base_name, ext = os.path.splitext(file_name)
-                counter = 1
-                while os.path.exists(output_path):
+                # 生成唯一的文件名
+                counter = used_filenames.get(original_name, 0) + 1
+                used_filenames[original_name] = counter
+                
+                # 如果是第一个文件，使用原始名称，否则添加数字后缀
+                if counter == 1:
+                    new_name = original_name
+                else:
                     new_name = f"{base_name}_{counter}{ext}"
-                    output_path = os.path.join(self.output_path, new_name)
-                    counter += 1
-
-                self.log_signal.emit(f"正在下载: {file_path} -> {os.path.basename(output_path)}")
+                
+                output_path = os.path.join(self.output_path, new_name)
+                
+                self.log_signal.emit(f"正在下载: {file_path} -> {new_name}")
                 
                 try:
                     # 使用流式下载
@@ -339,7 +359,7 @@ class DownloadThread(QThread):
                     successful_downloads += 1
                     self.downloaded_files = successful_downloads
                     self.progress_signal.emit(self.downloaded_files, self.total_files)
-                    self.log_signal.emit(f"下载完成: {os.path.basename(output_path)}")
+                    self.log_signal.emit(f"下载完成: {new_name}")
                     
                 except Exception as e:
                     self.log_signal.emit(f"下载文件 {file_path} 失败: {str(e)}")
@@ -368,19 +388,24 @@ class DownloadThread(QThread):
             response = requests.get(url, headers=headers, stream=True)
             response.raise_for_status()
             
-            # 只使用文件名，不使用完整路径
-            file_name = os.path.basename(output_path)
-            new_output_path = os.path.join(self.output_path, file_name)
+            # 获取原始文件名和扩展名
+            original_name = os.path.basename(output_path)
+            base_name, ext = os.path.splitext(original_name)
             
-            # 如果文件已存在，添加序号
-            base_name, ext = os.path.splitext(file_name)
+            # 生成唯一的文件名
             counter = 1
-            while os.path.exists(new_output_path):
-                new_name = f"{base_name}_{counter}{ext}"
-                new_output_path = os.path.join(self.output_path, new_name)
-                counter += 1
+            new_name = original_name
+            output_path = os.path.join(self.output_path, new_name)
             
-            with open(new_output_path, 'wb') as f:
+            while os.path.exists(output_path):
+                counter += 1
+                new_name = f"{base_name}_{counter}{ext}"
+                output_path = os.path.join(self.output_path, new_name)
+            
+            # 创建目录（如果不存在）
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            with open(output_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if not self.is_running:
                         return False
@@ -522,13 +547,13 @@ class DownloadThread(QThread):
                 elif content.type == 'file':
                     file_suffix = os.path.splitext(content.name)[1].lower()
                     if file_suffix in self.suffixes:
-                        self.log_signal.emit(f"正在下载: {content.path}")
+                        self.log_signal.emit(f"正下载: {content.path}")
                         output_path = os.path.join(self.output_path, content.path)
                         if self.download_file(content.download_url, output_path):
                             self.downloaded_files += 1
                             self.progress_signal.emit(self.downloaded_files, self.total_files)
                             self.log_signal.emit(f"下载完成: {content.path}")
-                        time.sleep(1)  # ��加延迟以避免触发API限制
+                        time.sleep(1)  # 加延迟以避免触发API限制
                 
         except RateLimitExceededException:
             raise
@@ -541,7 +566,7 @@ class DownloadThread(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("RepoRover - GitHub文件下载工具")
+        self.setWindowTitle("RepoRover - GitHub仓库文件筛选下载工具")
         self.setGeometry(100, 100, 800, 600)
         
         # 创建主窗口部件
@@ -567,7 +592,7 @@ class MainWindow(QMainWindow):
         path_layout = QHBoxLayout()
         path_label = QLabel("输出路径:")
         self.path_input = QLineEdit()
-        browse_button = QPushButton("浏览")
+        browse_button = QPushButton("浏")
         browse_button.clicked.connect(self.select_output_path)
         path_layout.addWidget(path_label)
         path_layout.addWidget(self.path_input)
