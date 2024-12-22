@@ -208,12 +208,10 @@ class PDFConverter:
                 fontName=self.default_font
             )
             
-            file_info = self.create_paragraph(
-                f"原始文件: {os.path.basename(input_path)}\n"
-                f"文件类型: {os.path.splitext(input_path)[1] or '未知'}",
-                info_style
-            )
-            story.append(file_info)
+            # 添加文件信息
+            file_info = f"原始文件: {os.path.basename(input_path)}"
+            story.append(Paragraph(file_info, info_style))
+            story.append(Spacer(1, 20))
             
             # 添加文件内容
             content_style = ParagraphStyle(
@@ -221,9 +219,7 @@ class PDFConverter:
                 parent=self.styles['Custom'],
                 fontSize=9,
                 leading=12,
-                fontName=self.default_font,
-                wordWrap='CJK',
-                encoding='utf-8'
+                fontName=self.default_font
             )
             
             # 处理内容
@@ -232,13 +228,15 @@ class PDFConverter:
                 for line in content.split('\n'):
                     if line.strip():
                         try:
-                            p = self.create_paragraph(line, content_style)
-                            story.append(p)
+                            # 转义特殊字符
+                            line = html.escape(line)
+                            story.append(Paragraph(line, content_style))
                             story.append(Spacer(1, 6))
-                        except:
+                        except Exception as e:
+                            self.logger.warning(f"处理行失败: {str(e)}")
                             continue
             else:
-                story.append(self.create_paragraph("（文件内容为空或无法读取）", content_style))
+                story.append(Paragraph("（文件内容为空或无法读取）", content_style))
                 
             # 生成PDF
             doc.build(story)
@@ -273,14 +271,8 @@ class PDFConverter:
         """转换文本文件为PDF"""
         try:
             # 读取文件内容
-            with open(input_path, 'rb') as f:
-                raw_data = f.read()
-                result = chardet.detect(raw_data)
-                encoding = result['encoding'] or 'utf-8'
-                
-            with open(input_path, 'r', encoding=encoding) as f:
-                content = f.read()
-                
+            content = self.try_read_as_text(input_path)
+            
             # 创建PDF文档
             doc = SimpleDocTemplate(
                 output_path,
@@ -288,37 +280,41 @@ class PDFConverter:
                 rightMargin=72,
                 leftMargin=72,
                 topMargin=72,
-                bottomMargin=72
+                bottomMargin=72,
+                encoding='utf-8'
             )
             
             story = []
             style = ParagraphStyle(
                 'CustomText',
                 parent=self.styles['Custom'],
-                fontName='Courier',
+                fontName=self.default_font,
                 fontSize=10,
-                leading=12
+                leading=14,
+                spaceBefore=6,
+                spaceAfter=6
             )
             
-            # 处理并添加容
-            lines = self.process_text_content(content)
-            for line in lines:
-                try:
-                    p = Paragraph(line, style)
-                    story.append(p)
-                    story.append(Spacer(1, 6))
-                except Exception as e:
-                    self.logger.warning(f"处理段落时出错，已跳过: {str(e)}")
-                    continue
-                    
-            # 如果没有有效内容，添加提示信息
-            if not lines:
-                story.append(Paragraph("（文件内容为空或无法处理）", style))
+            # 处理内容
+            if content:
+                for line in content.split('\n'):
+                    if line.strip():
+                        try:
+                            # 转义特殊字符
+                            line = html.escape(line)
+                            story.append(Paragraph(line, style))
+                        except Exception as e:
+                            self.logger.warning(f"处理行失败: {str(e)}")
+                            continue
+            else:
+                story.append(Paragraph("（文件内容为空或无法读取）", style))
                 
             # 生成PDF
             doc.build(story)
+            return True
         except Exception as e:
-            raise Exception(f"转换文本文件失败: {str(e)}")
+            self.logger.error(f"转换文本文件失败: {str(e)}")
+            return False
             
     def convert_docx(self, input_path, output_path):
         """转换DOCX文件为PDF"""
@@ -330,44 +326,60 @@ class PDFConverter:
                 rightMargin=72,
                 leftMargin=72,
                 topMargin=72,
-                bottomMargin=72
+                bottomMargin=72,
+                encoding='utf-8'
             )
             
             story = []
             
             # 处理段落
             for paragraph in doc.paragraphs:
-                if paragraph.text:
-                    p = Paragraph(paragraph.text, self.styles['Normal'])
-                    story.append(p)
-                    story.append(Spacer(1, 6))
+                if paragraph.text.strip():
+                    try:
+                        text = html.escape(paragraph.text)
+                        p = Paragraph(text, self.styles['Normal'])
+                        story.append(p)
+                        story.append(Spacer(1, 6))
+                    except Exception as e:
+                        self.logger.warning(f"处理段落失败: {str(e)}")
+                        continue
                     
             # 处理表格
             for table in doc.tables:
-                data = []
-                for row in table.rows:
-                    row_data = [cell.text for cell in row.cells]
-                    data.append(row_data)
-                    
-                if data:
-                    table_style = TableStyle([
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 10),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                    ])
-                    
-                    pdf_table = Table(data)
-                    pdf_table.setStyle(table_style)
-                    story.append(pdf_table)
-                    story.append(Spacer(1, 12))
+                try:
+                    data = []
+                    for row in table.rows:
+                        row_data = []
+                        for cell in row.cells:
+                            # 转义特殊字符
+                            text = html.escape(cell.text.strip())
+                            row_data.append(text)
+                        data.append(row_data)
+                        
+                    if data:
+                        table_style = TableStyle([
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('FONTNAME', (0, 0), (-1, 0), self.default_font),
+                            ('FONTSIZE', (0, 0), (-1, 0), 10),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                        ])
+                        
+                        pdf_table = Table(data)
+                        pdf_table.setStyle(table_style)
+                        story.append(pdf_table)
+                        story.append(Spacer(1, 12))
+                except Exception as e:
+                    self.logger.warning(f"处理表格失败: {str(e)}")
+                    continue
                     
             # 生成PDF
             pdf_doc.build(story)
+            return True
         except Exception as e:
-            raise Exception(f"转换DOCX文件失败: {str(e)}")
+            self.logger.error(f"转换DOCX文件失败: {str(e)}")
+            return False
             
     def convert_xlsx(self, input_path, output_path):
         """转换XLSX文件为PDF"""
@@ -379,54 +391,64 @@ class PDFConverter:
                 rightMargin=72,
                 leftMargin=72,
                 topMargin=72,
-                bottomMargin=72
+                bottomMargin=72,
+                encoding='utf-8'
             )
             
             story = []
             
             for sheet in wb:
-                # 添加工作表标题
-                title = Paragraph(f"<b>{sheet.title}</b>", self.styles['Heading1'])
-                story.append(title)
-                story.append(Spacer(1, 12))
-                
-                # 获取数据范围
-                min_row = sheet.min_row
-                max_row = sheet.max_row
-                min_col = sheet.min_column
-                max_col = sheet.max_column
-                
-                # 提取数据
-                data = []
-                for row in range(min_row, max_row + 1):
-                    row_data = []
-                    for col in range(min_col, max_col + 1):
-                        cell = sheet.cell(row, col)
-                        row_data.append(str(cell.value or ''))
-                    data.append(row_data)
+                try:
+                    # 添加工作表标题
+                    title = Paragraph(f"<b>{html.escape(sheet.title)}</b>", self.styles['Heading1'])
+                    story.append(title)
+                    story.append(Spacer(1, 12))
                     
-                if data:
-                    # 创建表格样式
-                    table_style = TableStyle([
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 10),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey90),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                    ])
+                    # 获取数据范围
+                    min_row = sheet.min_row
+                    max_row = min(sheet.max_row, 1000)  # 限制最大行数
+                    min_col = sheet.min_column
+                    max_col = min(sheet.max_column, 20)  # 限制最大列数
                     
-                    # 创建表格
-                    pdf_table = Table(data)
-                    pdf_table.setStyle(table_style)
-                    story.append(pdf_table)
-                    story.append(Spacer(1, 20))
+                    # 提取数据
+                    data = []
+                    for row in range(min_row, max_row + 1):
+                        row_data = []
+                        for col in range(min_col, max_col + 1):
+                            cell = sheet.cell(row, col)
+                            value = str(cell.value if cell.value is not None else '')
+                            # 转义特殊字符
+                            value = html.escape(value)
+                            row_data.append(value)
+                        data.append(row_data)
+                        
+                    if data:
+                        # 创建表格样式
+                        table_style = TableStyle([
+                            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                            ('FONTNAME', (0, 0), (-1, 0), self.default_font),
+                            ('FONTSIZE', (0, 0), (-1, 0), 10),
+                            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                            ('BACKGROUND', (0, 0), (-1, 0), colors.grey90),
+                            ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                        ])
+                        
+                        # 创建表格
+                        pdf_table = Table(data)
+                        pdf_table.setStyle(table_style)
+                        story.append(pdf_table)
+                        story.append(Spacer(1, 20))
+                except Exception as e:
+                    self.logger.warning(f"处理工作表 {sheet.title} 失败: {str(e)}")
+                    continue
                     
             # 生成PDF
             pdf_doc.build(story)
+            return True
         except Exception as e:
-            raise Exception(f"转换XLSX文件失败: {str(e)}")
+            self.logger.error(f"转换XLSX文件失败: {str(e)}")
+            return False
             
     def convert_pptx(self, input_path, output_path):
         """转换PPTX文件为PDF"""
@@ -438,7 +460,8 @@ class PDFConverter:
                 rightMargin=72,
                 leftMargin=72,
                 topMargin=72,
-                bottomMargin=72
+                bottomMargin=72,
+                encoding='utf-8'
             )
             
             story = []
@@ -452,26 +475,35 @@ class PDFConverter:
                 borderWidth=1,
                 borderColor=colors.black,
                 borderPadding=10,
-                backColor=colors.white
+                backColor=colors.white,
+                fontName=self.default_font
             )
             
             for idx, slide in enumerate(prs.slides, 1):
-                # 添加幻灯片标题
-                story.append(Paragraph(f"幻灯片 {idx}", self.styles['Heading1']))
-                story.append(Spacer(1, 12))
-                
-                # 处理形状（包括文本框）
-                for shape in slide.shapes:
-                    if hasattr(shape, "text") and shape.text:
-                        p = Paragraph(shape.text, slide_style)
-                        story.append(p)
-                        
-                story.append(Spacer(1, 20))
-                
+                try:
+                    # 添加幻灯片标题
+                    story.append(Paragraph(f"幻灯片 {idx}", self.styles['Heading1']))
+                    story.append(Spacer(1, 12))
+                    
+                    # 处理形状（包括文本框）
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text.strip():
+                            # 转义特殊字符
+                            text = html.escape(shape.text)
+                            p = Paragraph(text, slide_style)
+                            story.append(p)
+                            
+                    story.append(Spacer(1, 20))
+                except Exception as e:
+                    self.logger.warning(f"处理幻灯片 {idx} 失败: {str(e)}")
+                    continue
+                    
             # 生成PDF
             pdf_doc.build(story)
+            return True
         except Exception as e:
-            raise Exception(f"转换PPTX文件失败: {str(e)}")
+            self.logger.error(f"转换PPTX文件失败: {str(e)}")
+            return False
             
     def convert_image(self, input_path, output_path):
         """转换图片文件为PDF"""
@@ -488,9 +520,9 @@ class PDFConverter:
             img_width, img_height = image.size
             
             # 计算缩放比例
-            width_ratio = a4_width / img_width
-            height_ratio = a4_height / img_height
-            ratio = min(width_ratio, height_ratio) * 0.9  # 留出边距
+            width_ratio = (a4_width - 2*72) / img_width  # 减去左右边距
+            height_ratio = (a4_height - 2*72) / img_height  # 减去上下边距
+            ratio = min(width_ratio, height_ratio)
             
             # 计算缩放后的尺寸
             new_width = img_width * ratio
@@ -506,9 +538,10 @@ class PDFConverter:
             # 将图片绘制到PDF
             c.drawImage(input_path, x, y, width=new_width, height=new_height)
             c.save()
-            
+            return True
         except Exception as e:
-            raise Exception(f"转换图片文件失败: {str(e)}")
+            self.logger.error(f"转换图片文件失败: {str(e)}")
+            return False
             
     def convert_folder(self, folder_path, log_callback, progress_callback):
         """转换文件夹中的所有文件"""
