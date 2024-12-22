@@ -1,6 +1,6 @@
 # AnyFileToPDF
 
-![Version](https://img.shields.io/badge/version-0.1.0--beta-blue)
+![Version](https://img.shields.io/badge/version-0.1.2-blue)
 ![Python](https://img.shields.io/badge/python-3.8%2B-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -10,7 +10,15 @@
 
 ## ✨ 特性
 
-- 🚀 支持批量转换文件夹及其子文件夹中的文件
+- 🚀 强大的文件管理
+  - 树形文件结构显示
+  - 支持文件夹展开/折叠
+  - 支持多选文件和文件夹
+  - 智能文件扫描
+- 📂 灵活的文件选择
+  - 拖放文件或文件夹
+  - 批量选择文件
+  - 实时预览文件结构
 - 📄 支持多种文件格式：
   - 文档：`.docx`, `.doc`, `.txt`, `.rtf`
   - 表格：`.xlsx`, `.xls`
