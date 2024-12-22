@@ -170,7 +170,7 @@ class PDFConverter:
             # 创建段落
             return Paragraph(text, style)
         except Exception as e:
-            self.logger.warning(f"创建段落��败: {str(e)}")
+            self.logger.warning(f"创建段落失败: {str(e)}")
             # 返回一个简单的错误提示段落
             return Paragraph("（内容无法显示）", style)
             
@@ -561,7 +561,7 @@ class PDFConverter:
             return False
             
     def convert_folder(self, folder_path, log_callback, progress_callback):
-        """转换文件夹中的��有文件"""
+        """转换文件夹中的所有文件"""
         self.cancel_flag = False
         self.log_callback = log_callback
         self.progress_callback = progress_callback
