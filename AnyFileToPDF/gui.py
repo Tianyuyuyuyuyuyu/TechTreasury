@@ -16,13 +16,13 @@ class DropArea(QFrame):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self.setMinimumHeight(120)
+        self.setMinimumHeight(80)
         self.setStyleSheet("""
             QFrame {
                 border: 2px dashed #999999;
                 border-radius: 10px;
                 background-color: white;
-                padding: 20px;
+                padding: 10px;
             }
             QFrame:hover {
                 border-color: #4a90e2;
@@ -33,13 +33,14 @@ class DropArea(QFrame):
         # 创建布局
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(8)
+        layout.setSpacing(4)
+        layout.setContentsMargins(10, 5, 10, 5)
         
         # 添加主标题
         title_label = QLabel("单击上传或拖放")
         title_label.setStyleSheet("""
             color: #333333;
-            font-size: 15px;
+            font-size: 14px;
             font-weight: bold;
         """)
         title_label.setAlignment(Qt.AlignCenter)
@@ -49,7 +50,7 @@ class DropArea(QFrame):
         format_label = QLabel("支持文本文件、csv、电子表格、音频文件等！")
         format_label.setStyleSheet("""
             color: #666666;
-            font-size: 13px;
+            font-size: 12px;
         """)
         format_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(format_label)
@@ -63,7 +64,7 @@ class DropArea(QFrame):
                     border: 2px dashed #4a90e2;
                     border-radius: 10px;
                     background-color: #f8f9fa;
-                    padding: 20px;
+                    padding: 10px;
                 }
             """)
             
@@ -74,7 +75,7 @@ class DropArea(QFrame):
                 border: 2px dashed #999999;
                 border-radius: 10px;
                 background-color: white;
-                padding: 20px;
+                padding: 10px;
             }
             QFrame:hover {
                 border-color: #4a90e2;
@@ -86,14 +87,14 @@ class DropArea(QFrame):
         """放下文件时的处理"""
         self.setStyleSheet("""
             QFrame {
-                border: 2px dashed rgba(255, 255, 255, 0.3);
+                border: 2px dashed #999999;
                 border-radius: 10px;
-                background-color: #1e1e1e;
-                padding: 20px;
+                background-color: white;
+                padding: 10px;
             }
             QFrame:hover {
-                border-color: rgba(255, 255, 255, 0.5);
-                background-color: #2a2a2a;
+                border-color: #4a90e2;
+                background-color: #f8f9fa;
             }
         """)
         
@@ -155,7 +156,7 @@ class PDFConverterGUI(QMainWindow):
         try:
             # 设置口属性
             self.setWindowTitle("AnyFileToPDF转换器")
-            self.setMinimumSize(800, 600)
+            self.setMinimumSize(800, 500)
             
             # 设置窗口背景色
             self.setStyleSheet("""
@@ -173,8 +174,8 @@ class PDFConverterGUI(QMainWindow):
             
             # 创建主布局
             layout = QVBoxLayout(central_widget)
-            layout.setContentsMargins(40, 40, 40, 40)
-            layout.setSpacing(20)
+            layout.setContentsMargins(40, 20, 40, 20)
+            layout.setSpacing(15)
             
             # 添加拖放区域
             self.drop_area = DropArea()
