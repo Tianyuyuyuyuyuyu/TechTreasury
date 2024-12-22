@@ -19,14 +19,14 @@ class DropArea(QFrame):
         self.setMinimumHeight(120)
         self.setStyleSheet("""
             QFrame {
-                border: 2px dashed rgba(255, 255, 255, 0.3);
+                border: 2px dashed #999999;
                 border-radius: 10px;
-                background-color: #1e1e1e;
+                background-color: white;
                 padding: 20px;
             }
             QFrame:hover {
-                border-color: rgba(255, 255, 255, 0.5);
-                background-color: #2a2a2a;
+                border-color: #4a90e2;
+                background-color: #f8f9fa;
             }
         """)
         
@@ -38,7 +38,7 @@ class DropArea(QFrame):
         # 添加主标题
         title_label = QLabel("单击上传或拖放")
         title_label.setStyleSheet("""
-            color: rgba(255, 255, 255, 0.9);
+            color: #333333;
             font-size: 15px;
             font-weight: bold;
         """)
@@ -48,7 +48,7 @@ class DropArea(QFrame):
         # 添加支持的格式说明
         format_label = QLabel("支持文本文件、csv、电子表格、音频文件等！")
         format_label.setStyleSheet("""
-            color: rgba(255, 255, 255, 0.6);
+            color: #666666;
             font-size: 13px;
         """)
         format_label.setAlignment(Qt.AlignCenter)
@@ -60,9 +60,9 @@ class DropArea(QFrame):
             event.acceptProposedAction()
             self.setStyleSheet("""
                 QFrame {
-                    border: 2px dashed rgba(255, 255, 255, 0.5);
+                    border: 2px dashed #4a90e2;
                     border-radius: 10px;
-                    background-color: #2a2a2a;
+                    background-color: #f8f9fa;
                     padding: 20px;
                 }
             """)
@@ -71,14 +71,14 @@ class DropArea(QFrame):
         """拖出文件时的处理"""
         self.setStyleSheet("""
             QFrame {
-                border: 2px dashed rgba(255, 255, 255, 0.3);
+                border: 2px dashed #999999;
                 border-radius: 10px;
-                background-color: #1e1e1e;
+                background-color: white;
                 padding: 20px;
             }
             QFrame:hover {
-                border-color: rgba(255, 255, 255, 0.5);
-                background-color: #2a2a2a;
+                border-color: #4a90e2;
+                background-color: #f8f9fa;
             }
         """)
         
@@ -160,10 +160,10 @@ class PDFConverterGUI(QMainWindow):
             # 设置窗口背景色
             self.setStyleSheet("""
                 QMainWindow {
-                    background-color: #1e1e1e;
+                    background-color: #f5f5f5;
                 }
                 QWidget {
-                    background-color: #1e1e1e;
+                    background-color: #f5f5f5;
                 }
             """)
             
@@ -190,11 +190,11 @@ class PDFConverterGUI(QMainWindow):
                     border-radius: 5px;
                     text-align: center;
                     height: 20px;
-                    background-color: #2a2a2a;
-                    color: white;
+                    background-color: #e0e0e0;
+                    color: #333333;
                 }
                 QProgressBar::chunk {
-                    background-color: #0d6efd;
+                    background-color: #4a90e2;
                     border-radius: 5px;
                 }
             """)
@@ -203,7 +203,7 @@ class PDFConverterGUI(QMainWindow):
             # 日志区域
             log_label = QLabel("转换日志")
             log_label.setStyleSheet("""
-                color: rgba(255, 255, 255, 0.9);
+                color: #333333;
                 font-weight: bold;
                 font-size: 14px;
             """)
@@ -213,11 +213,11 @@ class PDFConverterGUI(QMainWindow):
             self.log_text.setReadOnly(True)
             self.log_text.setStyleSheet("""
                 QTextEdit {
-                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border: 1px solid #cccccc;
                     border-radius: 5px;
                     padding: 10px;
-                    background-color: #2a2a2a;
-                    color: rgba(255, 255, 255, 0.8);
+                    background-color: white;
+                    color: #333333;
                 }
             """)
             layout.addWidget(self.log_text)
@@ -229,7 +229,7 @@ class PDFConverterGUI(QMainWindow):
             self.start_button = QPushButton("开始转换")
             self.start_button.setStyleSheet("""
                 QPushButton {
-                    background-color: #0d6efd;
+                    background-color: #4a90e2;
                     color: white;
                     border: none;
                     padding: 8px 24px;
@@ -238,11 +238,11 @@ class PDFConverterGUI(QMainWindow):
                     font-size: 14px;
                 }
                 QPushButton:hover {
-                    background-color: #0b5ed7;
+                    background-color: #357abd;
                 }
                 QPushButton:disabled {
-                    background-color: #565656;
-                    color: rgba(255, 255, 255, 0.5);
+                    background-color: #cccccc;
+                    color: #666666;
                 }
             """)
             self.start_button.clicked.connect(self.start_conversion)
@@ -250,7 +250,7 @@ class PDFConverterGUI(QMainWindow):
             self.cancel_button = QPushButton("取消")
             self.cancel_button.setStyleSheet("""
                 QPushButton {
-                    background-color: #dc3545;
+                    background-color: #e74c3c;
                     color: white;
                     border: none;
                     padding: 8px 24px;
@@ -259,11 +259,11 @@ class PDFConverterGUI(QMainWindow):
                     font-size: 14px;
                 }
                 QPushButton:hover {
-                    background-color: #bb2d3b;
+                    background-color: #c0392b;
                 }
                 QPushButton:disabled {
-                    background-color: #565656;
-                    color: rgba(255, 255, 255, 0.5);
+                    background-color: #cccccc;
+                    color: #666666;
                 }
             """)
             self.cancel_button.clicked.connect(self.cancel_conversion)
@@ -344,7 +344,7 @@ class PDFConverterGUI(QMainWindow):
         self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.drop_area.setEnabled(True)
-        self.log_message("转��完成！")
+        self.log_message("转换完成！")
             
     def cancel_conversion(self):
         """取消转换"""

@@ -170,7 +170,7 @@ class PDFConverter:
             # 创建段落
             return Paragraph(text, style)
         except Exception as e:
-            self.logger.warning(f"创建段落失败: {str(e)}")
+            self.logger.warning(f"创建段落��败: {str(e)}")
             # 返回一个简单的错误提示段落
             return Paragraph("（内容无法显示）", style)
             
@@ -180,6 +180,11 @@ class PDFConverter:
             # 尝试读取文件内容
             content = self.try_read_as_text(input_path)
             
+            # 如果内容为空，跳过此文件
+            if not content or not content.strip():
+                self.logger.warning(f"文件内容为空，已跳过: {input_path}")
+                return False
+                
             # 创建PDF文档
             doc = SimpleDocTemplate(
                 output_path,
@@ -223,20 +228,23 @@ class PDFConverter:
             )
             
             # 处理内容
-            if content:
-                # 按行分割并处理
-                for line in content.split('\n'):
-                    if line.strip():
-                        try:
-                            # 转义特殊字符
-                            line = html.escape(line)
-                            story.append(Paragraph(line, content_style))
-                            story.append(Spacer(1, 6))
-                        except Exception as e:
-                            self.logger.warning(f"处理行失败: {str(e)}")
-                            continue
-            else:
-                story.append(Paragraph("（文件内容为空或无法读取）", content_style))
+            valid_content = False  # 用于标记是否有有效内容
+            for line in content.split('\n'):
+                if line.strip():
+                    try:
+                        # 转义特殊字符
+                        line = html.escape(line)
+                        story.append(Paragraph(line, content_style))
+                        story.append(Spacer(1, 6))
+                        valid_content = True
+                    except Exception as e:
+                        self.logger.warning(f"处理行失败: {str(e)}")
+                        continue
+                        
+            # 如果没有有效内容，返回False
+            if not valid_content:
+                self.logger.warning(f"文件无有效内容，已跳过: {input_path}")
+                return False
                 
             # 生成PDF
             doc.build(story)
@@ -273,6 +281,11 @@ class PDFConverter:
             # 读取文件内容
             content = self.try_read_as_text(input_path)
             
+            # 如果内容为空，跳过此文件
+            if not content or not content.strip():
+                self.logger.warning(f"文件内容为空，已跳过: {input_path}")
+                return False
+                
             # 创建PDF文档
             doc = SimpleDocTemplate(
                 output_path,
@@ -296,18 +309,22 @@ class PDFConverter:
             )
             
             # 处理内容
-            if content:
-                for line in content.split('\n'):
-                    if line.strip():
-                        try:
-                            # 转义特殊字符
-                            line = html.escape(line)
-                            story.append(Paragraph(line, style))
-                        except Exception as e:
-                            self.logger.warning(f"处理行失败: {str(e)}")
-                            continue
-            else:
-                story.append(Paragraph("（文件内容为空或无法读取）", style))
+            valid_content = False  # 用于标记是否有有效内容
+            for line in content.split('\n'):
+                if line.strip():
+                    try:
+                        # 转义特殊字符
+                        line = html.escape(line)
+                        story.append(Paragraph(line, style))
+                        valid_content = True
+                    except Exception as e:
+                        self.logger.warning(f"处理行失败: {str(e)}")
+                        continue
+                        
+            # 如果没有有效内容，返回False
+            if not valid_content:
+                self.logger.warning(f"文件无有效内容，已跳过: {input_path}")
+                return False
                 
             # 生成PDF
             doc.build(story)
@@ -544,7 +561,7 @@ class PDFConverter:
             return False
             
     def convert_folder(self, folder_path, log_callback, progress_callback):
-        """转换文件夹中的所有文件"""
+        """转换文件夹中的��有文件"""
         self.cancel_flag = False
         self.log_callback = log_callback
         self.progress_callback = progress_callback
