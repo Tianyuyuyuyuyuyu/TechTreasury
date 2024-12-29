@@ -1,9 +1,9 @@
 #define MyAppName "TByd NPM"
-#define MyAppVersion "0.1.0-beta.2"
+#define MyAppVersion "0.1.1"
 #define MyAppPublisher "TByd Team"
 #define MyAppURL "https://github.com/Tianyuyuyuyuyuyu/TByd"
 #define MyAppExeName "npm_registry_manage.exe"
-#define MyAppSourceDir "D:\UnityProjects\TByd\TByd.VisualizationTools\NpmRegistryPackageManageTool"
+#define MyAppSourceDir "H:\TYPersonal\TechTreasury\NpmRegistryPackageManageTool"
 
 [Setup]
 ; 注意: AppId的值为唯一标识此应用程序。
@@ -32,10 +32,13 @@ WizardStyle=modern
 PrivilegesRequired=admin
 ; 使用公共区域而不是用户区域
 UsedUserAreasWarning=no
+; 不显示语言选择对话框
+ShowLanguageDialog=no
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+; 将中文设置为第一个语言，这样它会成为默认语言
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked

@@ -55,18 +55,17 @@ class _PackageOperationsPageState extends ConsumerState<PackageOperationsPage> w
   }
 
   Future<void> _selectFolder() async {
-    String? folderPath = await FilePicker.platform.getDirectoryPath(
-      dialogTitle: '选择Unity Custom Package项目文件夹',
-    );
-
-    if (folderPath != null) {
-      setState(() {
-        _selectedFolderPath = folderPath;
-      });
-
-      // 尝试读取package.json
-      await _loadPackageConfig(folderPath);
+    final folderPath = await FilePicker.platform.getDirectoryPath();
+    if (folderPath == null) {
+      return;
     }
+
+    setState(() {
+      _selectedFolderPath = folderPath;
+    });
+
+    // 尝试读取package.json
+    await _loadPackageConfig(folderPath);
   }
 
   Future<void> _loadPackageConfig(String folderPath) async {

@@ -59,7 +59,7 @@ class _PackageUploadTerminalState extends ConsumerState<PackageUploadTerminal> {
     });
   }
 
-  void _appendOutput(String line, {bool showPrompt = false, Color? color}) {
+  void _appendOutput(String line, {Color? color}) {
     if (!mounted) return;
 
     final notifier = ref.read(terminalOutputProvider.notifier);

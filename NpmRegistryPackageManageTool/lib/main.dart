@@ -23,6 +23,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'src/providers/locale_provider.dart';
 import 'src/providers/auth_provider.dart';
 import 'src/providers/unity_version_provider.dart';
+import 'src/providers/update_provider.dart';
+
+// 更新服务
+import 'src/services/update_service.dart';
 
 // 页面路由
 import 'src/pages/login_page.dart';
@@ -42,6 +46,9 @@ Future<void> main() async {
   // 获取SharedPreferences实例用于本地数据存储
   final prefs = await SharedPreferences.getInstance();
 
+  // 检查更新
+  _checkForUpdates();
+
   // 运行应用程序
   runApp(
     ProviderScope(
@@ -54,6 +61,92 @@ Future<void> main() async {
   );
 }
 
+/// 检查更新
+Future<void> _checkForUpdates() async {
+  try {
+    final updateInfo = await UpdateService.checkForUpdate();
+    if (updateInfo != null) {
+      // 显示更新对话框
+      final BuildContext? context = null; // 这里需要获取context
+      if (context != null) {
+        showUpdateDialog(context, updateInfo);
+      }
+    }
+  } catch (e) {
+    print('Error checking for updates: $e');
+  }
+}
+
+/// 显示更新对话框
+void showUpdateDialog(BuildContext context, UpdateInfo updateInfo) {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => AlertDialog(
+      title: const Text('发现新版本'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('新版本: ${updateInfo.version}'),
+          const SizedBox(height: 8),
+          Text('更新内容:\n${updateInfo.releaseNotes}'),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('稍后更新'),
+        ),
+        FilledButton(
+          onPressed: () async {
+            Navigator.pop(context);
+            // 显示下载进度对话框
+            showDownloadDialog(context, updateInfo.downloadUrl);
+          },
+          child: const Text('立即更新'),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 显示下载进度对话框
+void showDownloadDialog(BuildContext context, String downloadUrl) {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => AlertDialog(
+      title: const Text('正在下载更新'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 16),
+          const Text('请稍候...'),
+        ],
+      ),
+    ),
+  );
+
+  // 开始下载
+  UpdateService.downloadUpdate(downloadUrl).then((filePath) {
+    if (filePath != null) {
+      Navigator.pop(context); // 关闭下载对话框
+      UpdateService.installUpdate(filePath);
+    } else {
+      Navigator.pop(context);
+      // 显示错误消息
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('下载更新失败，请稍后重试'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  });
+}
+
 /// 应用程序根组件
 ///
 /// 负责配置应用程序的基础设置，包括：
@@ -61,11 +154,36 @@ Future<void> main() async {
 /// - 国际化设置
 /// - 路由配置
 /// - 认证状态管理
-class MyApp extends ConsumerWidget {
+class MyApp extends ConsumerStatefulWidget {
   const MyApp({Key? key}) : super(key: key);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends ConsumerState<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    // 延迟检查更新，等待应用完全启动
+    Future.delayed(const Duration(seconds: 2), () {
+      _checkForUpdates();
+    });
+  }
+
+  Future<void> _checkForUpdates() async {
+    try {
+      final updateInfo = await ref.read(updateProvider).checkForUpdates();
+      if (updateInfo != null && mounted) {
+        showUpdateDialog(context, updateInfo);
+      }
+    } catch (e) {
+      print('Error checking for updates: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     // 监听当前语言环境
     final locale = ref.watch(localeProvider);
     // 监听认证状态
